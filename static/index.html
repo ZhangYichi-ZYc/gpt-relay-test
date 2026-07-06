@@ -183,6 +183,13 @@
   .btn:active:not(:disabled) { transform: translateY(0); }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+  .btn.stop {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+  }
+  .btn.stop:hover:not(:disabled) {
+    box-shadow: 0 0 32px rgba(239,68,68,0.4);
+  }
+
   .btn .spinner {
     display: none;
     width: 17px; height: 17px;
@@ -314,8 +321,8 @@
     </label>
   </div>
 
-  <button class="btn" id="detectBtn" onclick="startDetection()">
-    <span class="spinner"></span> 发起检测
+  <button class="btn" id="detectBtn">
+    <span class="spinner"></span> <span id="btnText">发起检测</span>
   </button>
 
   <!-- Status -->
@@ -341,14 +348,25 @@ const POLL_TIMEOUT  = 600_000;
 let pollTimer   = null;
 let pollStart   = null;
 let lastCount   = 0;
+let detecting   = false;
 
 /* ── DOM refs ── */
 const btn        = document.getElementById('detectBtn');
+const btnText    = document.getElementById('btnText');
 const dot        = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const preview    = document.getElementById('previewBlock');
 const previewImg = document.getElementById('previewImg');
 const logPanel   = document.getElementById('logPanel');
+
+/* ── Button handler ── */
+btn.addEventListener('click', () => {
+  if (detecting) {
+    stopDetection();
+  } else {
+    startDetection();
+  }
+});
 
 /* ── Helpers ── */
 function setStatus(cls, msg) {
@@ -373,6 +391,18 @@ function he(s) {
   return d.innerHTML;
 }
 
+function setDetecting(on) {
+  detecting = on;
+  if (on) {
+    btn.classList.add('stop');
+    btnText.textContent = '停止检测';
+  } else {
+    btn.classList.remove('loading', 'stop');
+    btn.disabled = false;
+    btnText.textContent = '发起检测';
+  }
+}
+
 function resetUI() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   logPanel.innerHTML = '';
@@ -381,7 +411,16 @@ function resetUI() {
   lastCount = 0;
 }
 
-/* ── Main action ── */
+/* ── Stop ── */
+function stopDetection() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+  addLog('用户手动停止检测', 'log-warn');
+  setStatus('warn', '已停止');
+  setDetecting(false);
+}
+
+/* ── Start ── */
 async function startDetection() {
   resetUI();
 
@@ -396,7 +435,7 @@ async function startDetection() {
   }
 
   btn.classList.add('loading');
-  btn.disabled = true;
+  setDetecting(true);
   setStatus('active', '发起检测...');
 
   addLog('发起检测请求', 'log-dim');
@@ -417,6 +456,9 @@ async function startDetection() {
 
     setStatus('active', '检测中 (0s)');
 
+    // Remove loading spinner, keep stop button active
+    btn.classList.remove('loading');
+
     // Poll
     pollStart = Date.now();
     pollTimer = setInterval(pollResults.bind(null, data.traceId), POLL_INTERVAL);
@@ -424,8 +466,7 @@ async function startDetection() {
   } catch (e) {
     addLog('请求失败: ' + e.message, 'log-error');
     setStatus('err', '请求失败');
-    btn.classList.remove('loading');
-    btn.disabled = false;
+    setDetecting(false);
   }
 }
 
@@ -434,10 +475,9 @@ async function pollResults(traceId) {
 
   if (elapsed > POLL_TIMEOUT) {
     clearInterval(pollTimer); pollTimer = null;
-    btn.classList.remove('loading');
-    btn.disabled = false;
     setStatus('warn', '超时 (' + (POLL_TIMEOUT / 1000) + 's)');
     addLog('轮询超时，已停止', 'log-warn');
+    setDetecting(false);
     return;
   }
 
@@ -473,9 +513,8 @@ async function pollResults(traceId) {
 
 function stopPolling(dotClass, msg) {
   clearInterval(pollTimer); pollTimer = null;
-  btn.classList.remove('loading');
-  btn.disabled = false;
   setStatus(dotClass, msg);
+  setDetecting(false);
 }
 </script>
 </body>
