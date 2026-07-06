@@ -14,6 +14,8 @@ import httpx
 from fastapi.middleware.cors import CORSMiddleware
 import base64
 from hashlib import md5
+import json
+from fastapi.staticfiles import StaticFiles
 
 # Set logging level to WARNING to suppress INFO messages
 logging.basicConfig(level=logging.WARNING)
@@ -51,7 +53,7 @@ def generate_base64_image(traceId):
 
 
 @app.get("/trace/openai")
-async def openai_request(url: str, key: str):
+async def openai_request(url: str, key: str, model: str = "gpt-4o", stream: bool = False):
     global recorded_ips
     traceId = int(time.time())
 
@@ -65,12 +67,12 @@ async def openai_request(url: str, key: str):
     response = {"traceId": traceId, "image": generate_base64_image(traceId)}
 
     # 异步发送 POST 请求
-    asyncio.create_task(send_post_request(url, key, traceId))
+    asyncio.create_task(send_post_request(url, key, model, traceId, stream))
 
     return response
 
 
-async def send_post_request(url: str, key: str, traceId: str):
+async def send_post_request(url: str, key: str, model: str, traceId: str, stream: bool):
     global recorded_ips
     headers = {
         'Accept': '',
@@ -81,7 +83,7 @@ async def send_post_request(url: str, key: str, traceId: str):
     # 改成你的图片地址
     image_url = f"https://example.com/trace/fake-image?traceId={traceId}"
     data = {
-        "model": "gpt-4o",
+        "model": model,
         "messages": [
             {
                 "role": "user",
@@ -92,21 +94,47 @@ async def send_post_request(url: str, key: str, traceId: str):
             }
         ],
         "max_tokens": 50,
-        "stream": False
+        "stream": stream
     }
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(url, headers=headers, json=data)
 
-            recorded_ips[traceId][2].append(f"渠道回复： {response.text}")
-            print("渠道回复 ", response.text)
-            if response.status_code != 200:
-                recorded_ips[traceId][2].append(f"Error: {response.text}")
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+        try:
+            if stream:
+                # 流式请求：逐行读取 SSE
+                chunk_count = 0
+                full_content = ""
+                async with client.stream("POST", url, headers=headers, json=data) as response:
+                    recorded_ips[traceId][2].append(f"渠道回复状态码: {response.status_code}")
+                    if response.status_code != 200:
+                        body = await response.aread()
+                        recorded_ips[traceId][2].append(f"Error: {body.decode('utf-8', errors='replace')}")
+                    else:
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: "):
+                                chunk_count += 1
+                                data_str = line[6:]
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data_str)
+                                    delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                    full_content += delta
+                                except (json.JSONDecodeError, KeyError, IndexError):
+                                    pass
+                        recorded_ips[traceId][2].append(f"流式响应完成，共 {chunk_count} chunks，内容: {full_content[:200]}")
+                        recorded_ips[traceId][2].append(f"完成探测")
             else:
-                recorded_ips[traceId][2].append(f"完成探测")
+                # 非流式请求（保持原有逻辑）
+                response = await client.post(url, headers=headers, json=data)
+                recorded_ips[traceId][2].append(f"渠道回复： {response.text}")
+                print("渠道回复 ", response.text)
+                if response.status_code != 200:
+                    recorded_ips[traceId][2].append(f"Error: {response.text}")
+                else:
+                    recorded_ips[traceId][2].append(f"完成探测")
         except Exception as e:
             # 输出异常信息
-            recorded_ips[traceId][2].append(f"Exception: {response.text}")
+            recorded_ips[traceId][2].append(f"Exception: {str(e)}")
 
     return traceId
 
@@ -219,6 +247,10 @@ async def fake_image(request: Request, traceId: str):
             f"Time: {current_time}, TraceId: {traceId}, x_forwarded_for: {x_forwarded_for}, cf_connecting_ip: {cf_connecting_ip}, Client Host: {client_host}, User Agent: {user_agent}")
 
     return StreamingResponse(buffer, media_type="image/webp")
+
+
+# Mount static files directory for frontend
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 
 if __name__ == "__main__":

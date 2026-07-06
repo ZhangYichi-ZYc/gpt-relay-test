@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPT Relay Detector</title>
+<style>
+  /* ── Reset & Tokens ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #06060e;
+    --card:     #0d0d1a;
+    --border:   #1c1c35;
+    --text:     #e4e4ed;
+    --dim:      #6e6e82;
+    --accent-1: #6366f1;
+    --accent-2: #8b5cf6;
+    --success:  #10b981;
+    --warning:  #f59e0b;
+    --danger:   #ef4444;
+    --input-bg: #090912;
+    --input-bd: #1a1a32;
+    --radius:   12px;
+    --font:     -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --mono:     'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  }
+
+  /* ── Body & Background ── */
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    /* Subtle dot grid — network ops feel */
+    background-image: radial-gradient(rgba(99,102,241,0.08) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 40px 36px;
+    width: 100%;
+    max-width: 560px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.5s;
+  }
+
+  /* Signature: animated scan-line border when detecting */
+  .card.scanning {
+    border-color: transparent;
+  }
+  .card.scanning::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 18px;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      var(--accent-1) 90deg,
+      var(--accent-2) 180deg,
+      transparent 270deg
+    );
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+    animation: scan-rotate 3s linear infinite;
+    z-index: 0;
+    pointer-events: none;
+  }
+  @keyframes scan-rotate { to { transform: rotate(360deg); } }
+
+  .card > * { position: relative; z-index: 1; }
+
+  /* ── Typography ── */
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .brand-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .title {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    background: linear-gradient(135deg, #a5b4fc, #c4b5fd);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle {
+    color: var(--dim);
+    font-size: 13px;
+    margin-bottom: 28px;
+    letter-spacing: 0.2px;
+  }
+
+  /* ── Form ── */
+  .field {
+    margin-bottom: 18px;
+  }
+  .field-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--dim);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .field-input {
+    width: 100%;
+    padding: 11px 14px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-bd);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 13.5px;
+    font-family: var(--mono);
+    transition: border-color 0.25s, box-shadow 0.25s;
+    outline: none;
+  }
+  .field-input:focus {
+    border-color: var(--accent-1);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+  }
+  .field-input::placeholder {
+    color: #3d3d55;
+    font-family: var(--font);
+    font-size: 12.5px;
+  }
+
+  /* ── Toggle ── */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    margin-bottom: 18px;
+  }
+  .toggle-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .toggle {
+    position: relative;
+    width: 46px; height: 26px;
+    flex-shrink: 0;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-track {
+    position: absolute; inset: 0;
+    background: var(--input-bd);
+    border-radius: 26px;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+    left: 3px; bottom: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.3s, background 0.3s;
+  }
+  .toggle input:checked + .toggle-track {
+    background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  }
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(20px);
+  }
+
+  /* ── Button ── */
+  .btn {
+    width: 100%;
+    padding: 13px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 15px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+    transition: box-shadow 0.3s, opacity 0.3s, transform 0.12s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn:hover:not(:disabled) {
+    box-shadow: 0 0 32px rgba(99,102,241,0.35);
+    transform: translateY(-1px);
+  }
+  .btn:active:not(:disabled) { transform: translateY(0); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn .spinner {
+    display: none;
+    width: 17px; height: 17px;
+    border: 2px solid rgba(255,255,255,0.25);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.65s linear infinite;
+  }
+  .btn.loading .spinner { display: block; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Status bar ── */
+  .status-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    background: var(--input-bg);
+    border: 1px solid var(--input-bd);
+    margin-top: 16px;
+    font-size: 13px;
+  }
+  .status-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #3d3d55;
+    transition: background 0.3s;
+  }
+  .status-dot.active { background: var(--accent-1); animation: ping 1.3s ease-in-out infinite; }
+  .status-dot.ok    { background: var(--success); }
+  .status-dot.warn  { background: var(--warning); }
+  .status-dot.err   { background: var(--danger); }
+
+  @keyframes ping {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.3; transform: scale(1.8); }
+  }
+
+  /* ── Preview ── */
+  .preview {
+    display: none;
+    margin-top: 14px;
+    text-align: center;
+  }
+  .preview img {
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    width: 72px; height: 72px;
+    image-rendering: pixelated;
+  }
+  .preview-label {
+    font-size: 11px; color: var(--dim);
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Log area ── */
+  .log-panel {
+    margin-top: 18px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-bd);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    max-height: 340px;
+    overflow-y: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    display: none;
+  }
+  .log-panel::-webkit-scrollbar { width: 5px; }
+  .log-panel::-webkit-scrollbar-track { background: transparent; }
+  .log-panel::-webkit-scrollbar-thumb { background: #222; border-radius: 3px; }
+
+  .log-entry {
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+  }
+  .log-time    { color: var(--success); }
+  .log-warn    { color: var(--warning); }
+  .log-error   { color: var(--danger); }
+  .log-dim     { color: var(--dim); }
+
+  /* ── Responsive ── */
+  @media (max-width: 480px) {
+    .card { padding: 28px 20px; }
+    .title { font-size: 20px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card.scanning::before { animation: none; }
+    .status-dot.active     { animation: none; opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="card" id="card">
+  <div class="brand">
+    <div class="brand-icon">🔍</div>
+    <h1 class="title">GPT Relay Detector</h1>
+  </div>
+  <p class="subtitle">检测 GPT API 是否为中转 / 反向代理</p>
+
+  <!-- Form -->
+  <div class="field">
+    <label class="field-label" for="baseUrl">Base URL</label>
+    <input class="field-input" id="baseUrl" type="text"
+           placeholder="https://api.openai.com/v1/chat/completions"
+           value="https://api.openai.com/v1/chat/completions" autocomplete="off">
+  </div>
+
+  <div class="field">
+    <label class="field-label" for="apiKey">API Key</label>
+    <input class="field-input" id="apiKey" type="password"
+           placeholder="sk-..." autocomplete="off">
+  </div>
+
+  <div class="field">
+    <label class="field-label" for="model">Model</label>
+    <input class="field-input" id="model" type="text"
+           placeholder="gpt-4o" value="gpt-4o" autocomplete="off">
+  </div>
+
+  <div class="toggle-row">
+    <span class="toggle-label">Stream 流式请求</span>
+    <label class="toggle">
+      <input type="checkbox" id="streamToggle">
+      <span class="toggle-track"></span>
+    </label>
+  </div>
+
+  <button class="btn" id="detectBtn" onclick="startDetection()">
+    <span class="spinner"></span> 发起检测
+  </button>
+
+  <!-- Status -->
+  <div class="status-bar">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText">等待操作</span>
+  </div>
+
+  <!-- Preview image -->
+  <div class="preview" id="previewBlock">
+    <div class="preview-label">TRACE IMAGE PREVIEW</div>
+    <img id="previewImg" src="" alt="Trace">
+  </div>
+
+  <!-- Log -->
+  <div class="log-panel" id="logPanel"></div>
+</div>
+
+<script>
+const POLL_INTERVAL = 2000;
+const POLL_TIMEOUT  = 600_000;
+
+let pollTimer   = null;
+let pollStart   = null;
+let lastCount   = 0;
+
+/* ── DOM refs ── */
+const card       = document.getElementById('card');
+const btn        = document.getElementById('detectBtn');
+const dot        = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const preview    = document.getElementById('previewBlock');
+const previewImg = document.getElementById('previewImg');
+const logPanel   = document.getElementById('logPanel');
+
+/* ── Helpers ── */
+function setStatus(cls, msg) {
+  dot.className = 'status-dot ' + cls;
+  statusText.textContent = msg;
+}
+
+function addLog(msg, cls) {
+  logPanel.style.display = 'block';
+  const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = '<span class="log-time">[' + now + ']</span> '
+    + '<span class="' + (cls || '') + '">' + he(msg) + '</span>';
+  logPanel.appendChild(div);
+  logPanel.scrollTop = logPanel.scrollHeight;
+}
+
+function he(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function resetUI() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  logPanel.innerHTML = '';
+  logPanel.style.display = 'none';
+  preview.style.display = 'none';
+  lastCount = 0;
+}
+
+/* ── Main action ── */
+async function startDetection() {
+  resetUI();
+
+  const baseUrl = document.getElementById('baseUrl').value.trim();
+  const apiKey  = document.getElementById('apiKey').value.trim();
+  const model   = document.getElementById('model').value.trim() || 'gpt-4o';
+  const stream  = document.getElementById('streamToggle').checked;
+
+  if (!baseUrl || !apiKey) {
+    setStatus('err', '请填写 Base URL 和 API Key');
+    return;
+  }
+
+  btn.classList.add('loading');
+  btn.disabled = true;
+  setStatus('active', '发起检测...');
+
+  addLog('发起检测请求', 'log-dim');
+  addLog('目标: ' + baseUrl, 'log-dim');
+  addLog('模型: ' + model + '  ·  Stream: ' + stream, 'log-dim');
+
+  try {
+    const qs = new URLSearchParams({ url: baseUrl, key: apiKey, model: model, stream: stream });
+    const resp = await fetch('/trace/openai?' + qs);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + await resp.text());
+
+    const data = await resp.json();
+    addLog('Trace ID: ' + data.traceId, 'log-dim');
+
+    // Show preview
+    previewImg.src = 'data:image/webp;base64,' + data.image;
+    preview.style.display = 'block';
+
+    // Start scan animation
+    card.classList.add('scanning');
+    setStatus('active', '检测中 (0s)');
+
+    // Poll
+    pollStart = Date.now();
+    pollTimer = setInterval(pollResults.bind(null, data.traceId), POLL_INTERVAL);
+
+  } catch (e) {
+    addLog('请求失败: ' + e.message, 'log-error');
+    setStatus('err', '请求失败');
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
+async function pollResults(traceId) {
+  const elapsed = Date.now() - pollStart;
+
+  if (elapsed > POLL_TIMEOUT) {
+    clearInterval(pollTimer); pollTimer = null;
+    card.classList.remove('scanning');
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    setStatus('warn', '超时 (' + (POLL_TIMEOUT / 1000) + 's)');
+    addLog('轮询超时，已停止', 'log-warn');
+    return;
+  }
+
+  try {
+    const r = await fetch('/trace/get-agent?traceId=' + traceId);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+
+    const results = await r.json();
+
+    if (Array.isArray(results) && results.length > lastCount) {
+      for (let i = lastCount; i < results.length; i++) {
+        const msg = results[i];
+        if (msg.includes('完成探测')) {
+          addLog(msg, 'log-dim');
+          stopPolling('ok', '检测完成');
+          return;
+        }
+        if (msg.includes('Error') || msg.includes('Exception') || msg.includes('超过')) {
+          addLog(msg, 'log-error');
+        } else {
+          addLog(msg, 'log-dim');
+        }
+      }
+      lastCount = results.length;
+    }
+
+    setStatus('active', '检测中 (' + Math.floor(elapsed / 1000) + 's)');
+
+  } catch (e) {
+    addLog('轮询错误: ' + e.message, 'log-error');
+  }
+}
+
+function stopPolling(dotClass, msg) {
+  clearInterval(pollTimer); pollTimer = null;
+  card.classList.remove('scanning');
+  btn.classList.remove('loading');
+  btn.disabled = false;
+  setStatus(dotClass, msg);
+}
+</script>
+</body>
+</html>
