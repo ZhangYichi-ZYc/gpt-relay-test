@@ -50,35 +50,7 @@
     width: 100%;
     max-width: 560px;
     position: relative;
-    overflow: hidden;
-    transition: border-color 0.5s;
   }
-
-  /* Signature: animated scan-line border when detecting */
-  .card.scanning {
-    border-color: transparent;
-  }
-  .card.scanning::before {
-    content: '';
-    position: absolute;
-    inset: -2px;
-    border-radius: 18px;
-    background: conic-gradient(
-      from 0deg,
-      transparent 0deg,
-      var(--accent-1) 90deg,
-      var(--accent-2) 180deg,
-      transparent 270deg
-    );
-    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-    animation: scan-rotate 3s linear infinite;
-    z-index: 0;
-    pointer-events: none;
-  }
-  @keyframes scan-rotate { to { transform: rotate(360deg); } }
-
-  .card > * { position: relative; z-index: 1; }
 
   /* ── Typography ── */
   .brand {
@@ -301,7 +273,6 @@
     .title { font-size: 20px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .card.scanning::before { animation: none; }
     .status-dot.active     { animation: none; opacity: 1; }
   }
 </style>
@@ -372,7 +343,6 @@ let pollStart   = null;
 let lastCount   = 0;
 
 /* ── DOM refs ── */
-const card       = document.getElementById('card');
 const btn        = document.getElementById('detectBtn');
 const dot        = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
@@ -445,8 +415,6 @@ async function startDetection() {
     previewImg.src = 'data:image/webp;base64,' + data.image;
     preview.style.display = 'block';
 
-    // Start scan animation
-    card.classList.add('scanning');
     setStatus('active', '检测中 (0s)');
 
     // Poll
@@ -466,7 +434,6 @@ async function pollResults(traceId) {
 
   if (elapsed > POLL_TIMEOUT) {
     clearInterval(pollTimer); pollTimer = null;
-    card.classList.remove('scanning');
     btn.classList.remove('loading');
     btn.disabled = false;
     setStatus('warn', '超时 (' + (POLL_TIMEOUT / 1000) + 's)');
@@ -506,7 +473,6 @@ async function pollResults(traceId) {
 
 function stopPolling(dotClass, msg) {
   clearInterval(pollTimer); pollTimer = null;
-  card.classList.remove('scanning');
   btn.classList.remove('loading');
   btn.disabled = false;
   setStatus(dotClass, msg);

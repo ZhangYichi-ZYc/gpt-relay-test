@@ -53,7 +53,7 @@ def generate_base64_image(traceId):
 
 
 @app.get("/trace/openai")
-async def openai_request(url: str, key: str, model: str = "gpt-4o", stream: bool = False):
+async def openai_request(request: Request, url: str, key: str, model: str = "gpt-4o", stream: bool = False):
     global recorded_ips
     traceId = int(time.time())
 
@@ -66,13 +66,19 @@ async def openai_request(url: str, key: str, model: str = "gpt-4o", stream: bool
     # 立即返回时间戳
     response = {"traceId": traceId, "image": generate_base64_image(traceId)}
 
+    # 构造图片URL，指向本服务器的 /trace/fake-image
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+    self_base = f"{scheme}://{host}"
+    image_url = f"{self_base}/trace/fake-image?traceId={traceId}"
+
     # 异步发送 POST 请求
-    asyncio.create_task(send_post_request(url, key, model, traceId, stream))
+    asyncio.create_task(send_post_request(url, key, model, traceId, stream, image_url))
 
     return response
 
 
-async def send_post_request(url: str, key: str, model: str, traceId: str, stream: bool):
+async def send_post_request(url: str, key: str, model: str, traceId: str, stream: bool, image_url: str):
     global recorded_ips
     headers = {
         'Accept': '',
@@ -80,8 +86,6 @@ async def send_post_request(url: str, key: str, model: str, traceId: str, stream
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {key}'
     }
-    # 改成你的图片地址
-    image_url = f"https://example.com/trace/fake-image?traceId={traceId}"
     data = {
         "model": model,
         "messages": [
